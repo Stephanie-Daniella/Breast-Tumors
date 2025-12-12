@@ -1,0 +1,573 @@
+---
+title: "Evaluating Model Accuracy and Interpreting Variable Selection in Predicting Malignant Breast Tumors"
+author: "Stephanie Daniella Hernandez Prado"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r}
+library(readxl)
+library(caret)
+library(randomForest)
+library(ggplot2)
+library(ggcorrplot)
+library(Metrics)
+``` 
+# Data Set
+```{r}
+# Reading the File
+Breast_Cancer <- read_excel("~/Stephanie/Maestria/Fall 2025/STST 578/Breas_Cancer/Breast_Cancer.xlsx") 
+
+head(Breast_Cancer)
+```
+
+```{r}
+data <- Breast_Cancer
+data$Diagnosis <- as.factor(data$Diagnosis) #Changeing response variable to a factor varaible
+```
+
+# K-folds CV set up
+
+```{r}
+set.seed(996) #Save the seed for replicavility
+
+folds <- createFolds(data$Diagnosis, k = 5, returnTrain = TRUE) #Set the 5 folds that will 
+#be used for k-fold CV
+
+Method <- trainControl(method = "cv", index = folds) #We set the K-folds CV method to fit 
+#the models
+```
+
+# Base Model
+
+```{r}
+suppressWarnings({ #Suopress Warning Messages
+
+  Base_Time <- system.time({  # Count the execution time
+    Base_model <- train(
+      Diagnosis ~ ., data = data, #model and data used
+      method = "glm", #Logistic model setting
+      family = binomial, #Binomial response
+      trControl = Method #CV setting
+    ) #Logistic Model Fitting
+  
+  })["elapsed"]
+})
+
+summary(Base_model$finalModel)
+```
+We can see that all variables are being used, even if some are not significant, as they have a very low p-value.
+
+# Stepwise
+
+```{r}
+suppressWarnings({
+    Stepwise_Time <- system.time({ 
+      Stepwise_Model <- train(
+        Diagnosis ~ ., data = data,
+        method = "glmStepAIC",
+        trControl = Method,
+        direction = "both", #Set stepwise method
+        trace = FALSE # Suppress training trace
+      )
+    })["elapsed"]
+})
+summary(Stepwise_Model$finalModel)
+``` 
+With a quick inspection, we can see that the p-values of this model are high for all the variables used, so they are highly significant.
+
+# Backward
+```{r}
+suppressWarnings({
+    Backward_Time <- system.time({ 
+      Backward_Model <- train(
+        Diagnosis ~ ., data = data,
+        method = "glmStepAIC",
+        trControl = Method,
+        direction = "backward", # Set backward method
+        trace = FALSE
+      )
+    })["elapsed"]
+})
+summary(Backward_Model$finalModel)
+```
+With a quick inspection, we can see that the p-values of this model are high for all the variables used, so they are highly significant.
+
+# Forward
+```{r}
+suppressWarnings({
+    Forward_Time <- system.time({ 
+      Forward_Model <- train(
+        Diagnosis ~ ., data = data,
+        method = "glmStepAIC",
+        trControl = Method,
+        direction = "forward", # Set forward method
+        trace = FALSE
+      )
+    })["elapsed"]
+})
+summary(Forward_Model$finalModel)
+```
+With a quick inspection, we can see that the p-values of this model are high for all the variables used, so they are highly significant.
+
+# Lasso
+```{r}
+suppressWarnings({
+    Lasso_Time <- system.time({ 
+      Lasso_Model <- train(
+        Diagnosis ~ ., data = data,
+        method = "glmnet",
+        trControl = Method,
+        tuneGrid = expand.grid(alpha = 1, 
+                               lambda = seq(0.0001, 1, length = 50)) # alpha=1 means lasso
+        #model and we fit for different lambdas
+      )
+    })["elapsed"]
+})
+
+best_lambda_lasso <- Lasso_Model$bestTune$lambda #Get the lambda of the best model
+
+coef(Lasso_Model$finalModel, s = best_lambda_lasso) #Coef of the model with the best lambda
+```
+
+With the Lasso penalty, using the best lambda, we can see how too many variables were discarded; now we need to compare its performance and see if this much simpler model is at least as good as the others.
+
+# Ridge
+```{r}
+suppressWarnings({
+    Ridge_Time <- system.time({ 
+      Ridge_Model <- train(
+        Diagnosis ~ ., data = data,
+        method = "glmnet",
+        trControl = Method,
+        tuneGrid = expand.grid(alpha = 0, lambda = seq(0.0001, 1, length = 50)) # alpha=0 
+        #means Ridge regression and we fit for different lambdas
+      )
+    })["elapsed"]
+})
+
+best_lambda_ridge <- Ridge_Model$bestTune$lambda #Best Ridge lambda
+
+coef(Ridge_Model$finalModel, s = best_lambda_ridge) #Coef of the model with the best lambda
+```
+Regression Rigge uses many variables, resulting in a more complex model; however, many of the coefficients show very small values. We will have to see if this complexity and the minimal contribution of some variables help its performance.
+
+# Random Forest
+```{r}
+suppressWarnings({
+    Random_Forest_Time <- system.time({ 
+      RF_model <- train(
+        Diagnosis ~ ., data = data,
+        method = "rf", # Train a random forest model
+        trControl = Method
+      )
+    })["elapsed"]
+})
+
+varImp(RF_model) # Importance of the 20 most important variables
+```
+
+# Table of coefficient comparison
+```{r}
+#Get the names of all the variables
+vars <- names(coef(Base_model$finalModel)) 
+
+# Data frame with the first column the 
+#name of all the variables
+df_coefs <- data.frame(
+  variable = vars,
+  stringsAsFactors = FALSE
+)
+
+#Function to extract the falue of the coef,
+#mo te sure that all the columns have the
+# same variables in the same order
+extract_coefs <- function(m, vars) {
+  
+  co <- m
+  
+  # Check if it is a sparse matrix 
+  #(Lasso and Ridge)
+  if ("dgCMatrix" %in% class(co)) {
+    #If so, extract the first column 
+    #that contains the names.
+    values <- as.numeric(co[,1])
+    names(values) <- rownames(co) 
+  } else {
+    #If not, extract the names of the
+    #coefficients.
+    values <- as.numeric(co)
+    names(values) <- names(co)
+  }
+
+  return(values[vars])
+}
+
+#Extract the coefficient values for each model
+df_coefs$Full_Model    <- extract_coefs(coef(Base_model$finalModel), vars)
+
+df_coefs$Stepwise <- extract_coefs(coef(Stepwise_Model$finalModel), vars)
+
+df_coefs$Backward <- extract_coefs(coef(Backward_Model$finalModel), vars)
+
+df_coefs$Forward  <- extract_coefs(coef(Forward_Model$finalModel), vars)
+
+df_coefs$Lasso <- extract_coefs(
+  coef(Lasso_Model$finalModel, s = Lasso_Model$bestTune$lambda),
+  vars
+)
+
+df_coefs$Ridge <- extract_coefs(
+  coef(Ridge_Model$finalModel, s = Ridge_Model$bestTune$lambda),
+  vars
+)
+
+#Round coefficients to 2 decimal places
+df_coefs[ , -1] <- round(df_coefs[ , -1], 2)
+
+#Replace NA and 0 with -
+df_coefs[is.na(df_coefs)|df_coefs==0] <- "-"
+
+df_coefs
+```
+
+We can see that the Lasso and Forward models are the simplest, with much smaller coefficient values. The Ridge model is slightly more complex, but its coefficient values are also very small. The Backward, Stepwise, and especially the Full model are more complex, and their coefficients are much larger.
+
+# Correlation analysis of variables
+
+A heat map showing the correlation of the explanatory variables will be displayed below.
+
+```{r}
+M <- cor(data[sapply(data, is.numeric)])
+
+ggcorrplot(M, hc.order = TRUE, type = "lower",
+           lab = TRUE, lab_size = 2)
+```
+There are too many variables, but we can easily notice that most of the squares are painted red, which indicates a strong correlation between the different variables in our data set.
+
+This highly correlated data creates a multicollinearity problem in the logistic model that uses all the variables. This makes the model unstable and requires large coefficients to balance the repeated effects explained by other variables.
+
+It's surprising that the base model has such high accuracy given its clear collinearity issues. But how does Lasso achieve slightly better precision without using so many variables and with much smaller coefficients?
+
+First, let's make a list of the variables with the absolute value lowest average correlation.
+
+```{r}
+numeric_data <- data[, sapply(data, is.numeric)]
+
+#Correlation matrix
+M <- cor(numeric_data, use = "pairwise.complete.obs")
+
+diag(M) <- NA
+
+#We take the average of the correlations
+avg_corr <- apply(abs(M), 1, mean, na.rm = TRUE)
+
+# We ordered from highest to lowest correlation
+avg_corr_sorted <- sort(avg_corr, decreasing = TRUE)
+
+most_correlated <- names(avg_corr_sorted)[tail(order(avg_corr_sorted), 10)]
+
+most_correlated
+```
+
+We can see that 4 of the 10 most correlated variables are used by Lasso: concave_points1, radius3, concavity3 and concave_points3. Let's see if we can extract those with the lowest absolute value average correlation.
+
+```{r}
+most_correlated <- names(avg_corr_sorted)[20:30]
+
+most_correlated
+```
+
+We can see that Lasso uses 3 of the variables with the least average correlation in absolute value: texture3, smoothness3 and symmetry3.
+
+And finally there is the variable radius 2, which remains in the variables with intermediate average absolute correlation, specifically it is the 14th ordered from highest to lowest.
+
+We can see that Lasso uses a combination of highly correlated variables, with poorly correlated variables and an intermediate variable.
+
+The heat map of the variables used by Lasso is shown below.
+```{r}
+vars <- c(
+  "concave_points1", "radius2", "radius3", "texture3",
+  "smoothness3", "concavity3", "concave_points3", "symmetry3"
+)
+
+data_sub <- data[, vars]
+
+M <- cor(data_sub[sapply(data_sub, is.numeric)])
+
+ggcorrplot(M, hc.order = TRUE, type = "lower",
+           lab = TRUE, lab_size = 2)
+```
+We can see that variables with low correlation are in more orange or white tones, while variables with higher correlation tend to be more red.
+
+This choice of variables is not accidental; in fact, it's quite logical. The explanation I can offer is that Lasso, being penalized, uses highly correlated variables to explain the greater amount of information contained in many variables, synthesizing it into a few. Meanwhile, he uses some less correlated variables to explain more specific information not found in other variables.
+
+
+# Accuracy comparison
+
+```{r}
+#Statistical summary of the 5-fold CV 
+#for each model 
+
+results <- resamples(list(
+  logit = Base_model,
+  stepwise = Stepwise_Model,
+  backward = Backward_Model,
+  forward = Forward_Model,
+  lasso = Lasso_Model,
+  ridge = Ridge_Model,
+  rf = RF_model
+))
+
+summary(results)$statistics$Accuracy
+```
+Accuracy is the proportion of correct predictions out of the total number of observations.
+
+$$Accurracy=\frac{\text{Correct predictions}}{\text{Total predictions}}$$
+```{r}
+bwplot(results, metric = "Accuracy", main = "Accuracy distribution by model")
+```
+This chart shows a statistical summary of the accuracy of the 5 folds used.
+
+The box shows the first and third quartiles; the black dot is the median. Points outside the whiskers are outliers.
+
+```{r}
+dotplot(results, metric = "Accuracy", main = "Comparison of accuracy by model")
+```
+In this graph, the dot shows the average accuracy across the 5 folds for each model. The line around it shows the dispersion in accuracy. Shorter lines indicate a more consistent metric, while longer lines indicate less consistency and greater variability.
+
+# Fitting Time
+```{r}
+#Combine the training times into one data frame
+Times_DF <- data.frame(
+  #Models column
+  Model = c("Logistic", "Stepwise", "Backward", "Forward", "Lasso", "Ridge", "RandomForest"),
+  #Column of Times
+  Fitting_Time = c(Base_Time, Stepwise_Time, Backward_Time, Forward_Time, 
+                   Lasso_Time, Ridge_Time, Random_Forest_Time)
+)
+
+#Order from smallest to largest
+Times_DF <- Times_DF[order(Times_DF$Fitting_Time), ]
+
+Times_DF
+```
+This table shows the time it takes to train each model.
+
+# Comparison
+```{r}
+
+#We extract the average of Accuracy
+Metrics<- summary(results)
+metrics_summary <- Metrics$statistics
+
+accuracy_mean <- metrics_summary$Accuracy[,'Mean']
+
+#We create a vector with the times
+tiempos <- c(Base_Time, Stepwise_Time, Backward_Time, Forward_Time, Lasso_Time, Ridge_Time, 
+             Random_Forest_Time)
+
+#Date Frame with the values to compare the models
+Comparison <- data.frame(
+  Model = names(accuracy_mean),
+  Accuracy_Mean = unname(accuracy_mean),
+  Time = tiempos
+)
+
+Comparison
+``` 
+
+# Time Graph
+```{r}
+ggplot(Comparison, 
+       #Order the bars from shortest to longest time
+       aes(x = reorder(Model, Time), y = Time)) +
+  
+  #draw bars according to the time values
+  geom_bar(stat = "identity", fill = "skyblue") +
+  coord_flip() + #makes the bars horizontal
+    #Labels
+  labs(title = "Comparison of training times",
+       x = "Model",
+       y = "Time (sec)") +
+  theme_minimal()
+```
+
+Note that the most accurate models are Ridge, followed by Lasso, and then Random Forest. Ridge's training time is slightly faster than Lasso, but Random Forest takes almost six times longer to be adjusted. Recall that in terms of complexity, the Lasso model was the simplest, but Ridge, despite being more complex, wasn't as complex as the other models. 
+
+We can conclude that the Lasso model is the best option, as it offers simplicity, good accuracy, and a short adjustment time. If we are willing to sacrifice simplicity for a shorter training time and greater accuracy, Ridge is the best choice. Random Forest, being a machine learning model and therefore much less interpretable, has similar accuracy to the other models, which, while not bad, are inferior to Lasso and Ridge. Even so, it is faster and more accurate than the other models. The other models are not worthwhile in this situation; they have a significantly longer training time, their accuracy is worse, and they are much more complex.
+
+# Let's repeat this analysis 50 times
+
+Due to the time it takes for them to adjust, we will not be using the Backward and Stepwise models. These models did not demonstrate outstanding performance, so I decided to forgot them at this stage.
+
+To obtain more conclusive data, we will repeat this same experiment 50 times, with different folds, to obtain a more precise sample of accuracy and not attribute it to chance.
+
+## Creation of the folds for the different iterations
+```{r}
+n_repeats <- 50
+k <- 5
+
+set.seed(996)
+
+#Vector that stores the folds for each iteration.
+folds_list <- vector("list", n_repeats)
+
+for (i in 1:n_repeats) {
+  folds_list[[i]] <- createFolds(y = data$Diagnosis, k = k, returnTrain = TRUE)
+}
+```
+
+## Training and storage of results
+
+```{r}
+results_list <- list()
+
+for (i in 1:n_repeats) {
+  # I establish the folds that correspond 
+  #to each iteration.
+  Method <- trainControl(
+    method = "cv",
+    number = k,
+    index = folds_list[[i]],
+    summaryFunction = twoClassSummary,
+    classProbs = TRUE,  
+    savePredictions = "final"
+  )
+  
+  suppressWarnings({ 
+
+  Base_Time <- system.time({  
+    Base_model <- train(
+      Diagnosis ~ ., data = data, 
+      method = "glm", 
+      family = binomial, 
+      trControl = Method 
+    ) 
+  })["elapsed"]
+  
+  
+  Forward_Time <- system.time({ 
+      Forward_Model <- train(
+        Diagnosis ~ ., data = data,
+        method = "glmStepAIC",
+        trControl = Method,
+        direction = "forward",
+        trace = FALSE
+      )
+    })["elapsed"]
+  
+  
+  Lasso_Time <- system.time({ 
+      Lasso_Model <- train(
+        Diagnosis ~ ., data = data,
+        method = "glmnet",
+        trControl = Method,
+        tuneGrid = expand.grid(alpha = 1, 
+                               lambda = seq(0.0001, 1, length = 50))
+      )
+    })["elapsed"]
+  
+  Lasso_Model$pred <- Lasso_Model$pred[
+    Lasso_Model$pred$lambda == Lasso_Model$bestTune$lambda, ]
+  
+  
+  Ridge_Time <- system.time({ 
+      Ridge_Model <- train(
+        Diagnosis ~ ., data = data,
+        method = "glmnet",
+        trControl = Method,
+        tuneGrid = expand.grid(alpha = 0, lambda = seq(0.0001, 1, length = 50)) 
+      )
+    })["elapsed"]
+  
+  Ridge_Model$pred <- Ridge_Model$pred[
+    Ridge_Model$pred$lambda == Ridge_Model$bestTune$lambda, ]
+  
+  
+  Random_Forest_Time <- system.time({ 
+      RF_model <- train(
+        Diagnosis ~ ., data = data,
+        method = "rf",
+        trControl = Method
+      )
+    })["elapsed"]
+  
+})
+  
+  results_list[[i]] <- list(Logit = Base_model, Forward=Forward_Model,
+                            LASSO=Lasso_Model, Ridge=Ridge_Model, RF = RF_model)
+
+}
+
+```
+
+## Summary the results
+
+```{r}
+all_results <- data.frame()
+
+for (i in 1:n_repeats) {
+  for (model_name in names(results_list[[i]])) {
+    
+    pred <- results_list[[i]][[model_name]]$pred
+    
+    # Accuracy average
+    acc <- mean(pred$pred == pred$obs)
+    
+    # Brier Score 
+    probs <- pred$M  
+    obs <- ifelse(pred$obs == "M", 1, 0)
+    brier <- mean((probs - obs)^2)
+    
+    all_results <- rbind(all_results,
+                         data.frame(
+                           iteration = i,
+                           model = model_name,
+                           Accuracy = acc,
+                           Brier = brier
+                         ))
+  }
+}
+```
+
+## Graphs
+
+```{r}
+ggplot(all_results, aes(x = model, y = Accuracy, fill = model)) +
+  geom_boxplot() +
+  theme_minimal() +
+  ggtitle("Distribution of Accuracy 50 reps")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+
+# Boxplot Brier
+ggplot(all_results, aes(x = model, y = Brier, fill = model)) +
+  geom_boxplot() +
+  theme_minimal() +
+  ggtitle("Distribution of Brier Score 50 reps")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+```
+Accuracy is the proportion of correct predictions out of the total number of observations.
+
+$$Accurracy=\frac{\text{Correct predictions}}{\text{Total predictions}}$$
+Brier Score is the mean squared error of the forecast. It tells us how confidently the model predicts the response variable in each observation.
+
+$$\text{Brier Score}=\frac{1}{N}\sum_{i=1}^N(p_i=y_i)^2$$
+
+Where:
+
+$p_i$: Predicted probability of the positive class.
+
+$y_i$: Actual value encoded as 0 or 1.
+
+# Final Reflection
+
+Looking at the box plot for the 50 repetitions, we can conclude that Ridge remains the best-performing model, followed by LASSO. Random Forest is still a good candidate but is on par with Forward, falling behind these two. 
+
+Using the Brier Score, we can conclude that the models predict with high accuracy, particulary Ridge and Lasso, in the same order of performance. Ridge and Lasso have smaller boxes, suggesting that their prediction accuracy is more consistent than the others. 
+
+Our final conclusion is the same as with the single-repetition model. The most accurate and reliable predictor is Ridge, but if we don't mind sacrificing a little precision for a much simpler model, LASSO is undoubtedly the clear winner. Although RF is also a good candidate, it still lags behind the two mentioned above and completely lacks interpretability. 
+
+In my opinion, the best model is LASSO; it is simple, accurate, reliable, and interpretable, not to mention that its penalty is much easier to understand.
