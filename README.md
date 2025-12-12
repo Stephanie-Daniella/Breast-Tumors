@@ -1,1 +1,9 @@
+Early detection of breast cancer is crucial to improve clinical outcomes and reduce mortality. In this study, we analyzed a dataset composed of morphological measurements obtained from digitized images of breast cells, with the aim of predicting whether a sample corresponds to a malignant or benign tumor. Due to the high dimensionality of the dataset and the strong correlations between many of the variables, it is necessary to carefully evaluate different modeling methods to determine which offer the best predictive performance and greatest stability.
+
+The main objective of this work is to compare the performance of different classification models: Logistic Regression, Stepwise Selection, Backward Selection, Forward Selection, LASSO, and Ridge, with the intention of comparing them to a Random Forest machine learning model. To make the comparison as stable and comparable as possible, we will use a 5-fold Cross-Validation procedure, performing it 50 times with the same 5 folds for each model in each iteration.
+
+Performance evaluation is performed by comparing the averages of the cross-validation Accuracy, which measures the percentage of correct classifications, and the Brier Score, which quantifies the confidence with which a model makes a prediction. We will also explore why models like LASSO choose certain variables to synthesize information and achieve simpler models in the presence of multicollinearity.
+
+Finally, we will seek to identify the most accurate, stable and appropriate model for each situation to predict tumor diagnosis
+
 There are two documents with the same name; the only difference is the file extension. The document ending in .rmd is the Markdown file containing the code ready to be executed in R, while the other is a compiled PDF. The code is already prepared for seamless replication; you only need to modify the dataset address on your computer. The database is stored in the XLSX file named Breas_Cancer.
