@@ -1,5 +1,5 @@
 ---
-title: "Evaluating Model Accuracy and Interpreting Variable Selection in Predicting Malignant Breast Tumors"
+title: "Appendix B: Code used"
 author: "Stephanie Daniella Hernandez Prado"
 date: "`r Sys.Date()`"
 output: pdf_document
@@ -554,7 +554,7 @@ Accuracy is the proportion of correct predictions out of the total number of obs
 $$Accurracy=\frac{\text{Correct predictions}}{\text{Total predictions}}$$
 Brier Score is the mean squared error of the forecast. It tells us how confidently the model predicts the response variable in each observation.
 
-$$\text{Brier Score}=\frac{1}{N}\sum_{i=1}^N(p_i=y_i)^2$$
+$$\text{Brier Score}=\frac{1}{N}\sum_{i=1}^N(p_i-y_i)^2$$
 
 Where:
 
